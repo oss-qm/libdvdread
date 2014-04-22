@@ -29,6 +29,7 @@
 #include <stdio.h>          /* fprintf */
 #include <errno.h>          /* errno, EIN* */
 #include <string.h>         /* memcpy, strlen */
+#define _GNU_SOURCE         /* Hurd support */
 #include <unistd.h>         /* chdir, getcwd */
 #include <limits.h>         /* PATH_MAX */
 #include <dirent.h>         /* opendir, readdir */
@@ -452,6 +453,12 @@ static dvd_reader_t *DVDOpenCommon( const char *ppath,
         if( chdir( path_copy ) == -1 ) {
           goto DVDOpen_error;
         }
+#ifdef __GLIBC__
+        new_path = get_current_dir_name();
+        if(new_path == NULL) {
+          goto DVDOpen_error;
+        }
+#else
         new_path = malloc(PATH_MAX+1);
         if(!new_path) {
           goto DVDOpen_error;
@@ -459,6 +466,7 @@ static dvd_reader_t *DVDOpenCommon( const char *ppath,
         if( getcwd( new_path, PATH_MAX ) == NULL ) {
           goto DVDOpen_error;
         }
+#endif
         retval = fchdir( cdir );
         close( cdir );
         cdir = -1;
@@ -703,17 +711,23 @@ static dvd_file_t *DVDOpenFileUDF( dvd_reader_t *dvd, char *filename,
  *     or -1 on file not found.
  *     or -2 on path not found.
  */
-static int findDirFile( const char *path, const char *file, char *filename )
+static int findDirFile( const char *path, const char *file, char **filename )
 {
   DIR *dir;
   struct dirent *ent;
+  *filename = NULL;
 
   dir = opendir( path );
   if( !dir ) return -2;
 
   while( ( ent = readdir( dir ) ) != NULL ) {
     if( !strcasecmp( ent->d_name, file ) ) {
-      sprintf( filename, "%s%s%s", path,
+      *filename = malloc( strlen( path ) + 1 + strlen( ent->d_name ) + 1 );
+      if( *filename == NULL ) {
+        closedir(dir);
+        return -1;
+      }
+      sprintf( *filename, "%s%s%s", path,
                ( ( path[ strlen( path ) - 1 ] == '/' ) ? "" : "/" ),
                ent->d_name );
       closedir(dir);
@@ -724,7 +738,7 @@ static int findDirFile( const char *path, const char *file, char *filename )
   return -1;
 }
 
-static int findDVDFile( dvd_reader_t *dvd, const char *file, char *filename )
+static int findDVDFile( dvd_reader_t *dvd, const char *file, char **filename )
 {
   const char *nodirfile;
   int ret;
@@ -738,9 +752,11 @@ static int findDVDFile( dvd_reader_t *dvd, const char *file, char *filename )
 
   ret = findDirFile( dvd->path_root, nodirfile, filename );
   if( ret < 0 ) {
-    char video_path[ PATH_MAX + 1 ];
+    char *video_path = NULL;
 
     /* Try also with adding the path, just in case. */
+    video_path = malloc( strlen( dvd->path_root ) + 10 + 1 );
+    if( video_path == NULL ) return 0;
     sprintf( video_path, "%s/VIDEO_TS/", dvd->path_root );
     ret = findDirFile( video_path, nodirfile, filename );
     if( ret < 0 ) {
@@ -748,9 +764,11 @@ static int findDVDFile( dvd_reader_t *dvd, const char *file, char *filename )
       sprintf( video_path, "%s/video_ts/", dvd->path_root );
       ret = findDirFile( video_path, nodirfile, filename );
       if( ret < 0 ) {
+        free( video_path );
         return 0;
       }
     }
+    free( video_path );
   }
 
   return 1;
@@ -761,20 +779,22 @@ static int findDVDFile( dvd_reader_t *dvd, const char *file, char *filename )
  */
 static dvd_file_t *DVDOpenFilePath( dvd_reader_t *dvd, char *filename )
 {
-  char full_path[ PATH_MAX + 1 ];
+  char *full_path = NULL;
   dvd_file_t *dvd_file;
   struct stat fileinfo;
   dvd_input_t dev;
 
   /* Get the full path of the file. */
-  if( !findDVDFile( dvd, filename, full_path ) ) {
+  if( !findDVDFile( dvd, filename, &full_path ) ) {
     fprintf( stderr, "libdvdread:DVDOpenFilePath:findDVDFile %s failed\n", filename );
+    free( full_path );
     return NULL;
   }
 
   dev = dvdinput_open( full_path, NULL, NULL );
   if( !dev ) {
     fprintf( stderr, "libdvdread:DVDOpenFilePath:dvdinput_open %s failed\n", full_path );
+    free( full_path );
     return NULL;
   }
 
@@ -782,6 +802,7 @@ static dvd_file_t *DVDOpenFilePath( dvd_reader_t *dvd, char *filename )
   if( !dvd_file ) {
     fprintf( stderr, "libdvdread:DVDOpenFilePath:dvd_file malloc failed\n" );
     dvdinput_close(dev);
+    free( full_path );
     return NULL;
   }
   dvd_file->dvd = dvd;
@@ -794,6 +815,7 @@ static dvd_file_t *DVDOpenFilePath( dvd_reader_t *dvd, char *filename )
 
   if( stat( full_path, &fileinfo ) < 0 ) {
     fprintf( stderr, "libdvdread: Can't stat() %s.\n", filename );
+    free( full_path );
     free( dvd_file );
     dvdinput_close( dev );
     return NULL;
@@ -802,6 +824,7 @@ static dvd_file_t *DVDOpenFilePath( dvd_reader_t *dvd, char *filename )
   dvd_file->title_devs[ 0 ] = dev;
   dvd_file->filesize = dvd_file->title_sizes[ 0 ];
 
+  free( full_path );
   return dvd_file;
 }
 
@@ -858,7 +881,7 @@ static dvd_file_t *DVDOpenVOBUDF( dvd_reader_t *dvd, int title, int menu )
 static dvd_file_t *DVDOpenVOBPath( dvd_reader_t *dvd, int title, int menu )
 {
   char filename[ MAX_UDF_FILE_NAME_LEN ];
-  char full_path[ PATH_MAX + 1 ];
+  char *full_path = NULL;
   struct stat fileinfo;
   dvd_file_t *dvd_file;
 
@@ -881,13 +904,15 @@ static dvd_file_t *DVDOpenVOBPath( dvd_reader_t *dvd, int title, int menu )
     } else {
       sprintf( filename, "VTS_%02i_0.VOB", title );
     }
-    if( !findDVDFile( dvd, filename, full_path ) ) {
+    if( !findDVDFile( dvd, filename, &full_path ) ) {
+      free( full_path );
       free( dvd_file );
       return NULL;
     }
 
     dev = dvdinput_open( full_path, NULL, NULL );
     if( dev == NULL ) {
+      free( full_path );
       free( dvd_file );
       return NULL;
     }
@@ -895,6 +920,7 @@ static dvd_file_t *DVDOpenVOBPath( dvd_reader_t *dvd, int title, int menu )
     if( stat( full_path, &fileinfo ) < 0 ) {
       fprintf( stderr, "libdvdread: Can't stat() %s.\n", filename );
       dvdinput_close(dev);
+      free( full_path );
       free( dvd_file );
       return NULL;
     }
@@ -909,7 +935,7 @@ static dvd_file_t *DVDOpenVOBPath( dvd_reader_t *dvd, int title, int menu )
     for( i = 0; i < TITLES_MAX; ++i ) {
 
       sprintf( filename, "VTS_%02i_%i.VOB", title, i + 1 );
-      if( !findDVDFile( dvd, filename, full_path ) ) {
+      if( !findDVDFile( dvd, filename, &full_path ) ) {
         break;
       }
 
@@ -924,11 +950,13 @@ static dvd_file_t *DVDOpenVOBPath( dvd_reader_t *dvd, int title, int menu )
       dvd_file->filesize += dvd_file->title_sizes[ i ];
     }
     if( !dvd_file->title_devs[ 0 ] ) {
+      free( full_path );
       free( dvd_file );
       return NULL;
     }
   }
 
+  free( full_path );
   return dvd_file;
 }
 
@@ -1054,7 +1082,7 @@ static int DVDFileStatVOBPath( dvd_reader_t *dvd, int title,
                                int menu, dvd_stat_t *statbuf )
 {
   char filename[ MAX_UDF_FILE_NAME_LEN ];
-  char full_path[ PATH_MAX + 1 ];
+  char *full_path = NULL;
   struct stat fileinfo;
   off_t tot_size;
   off_t parts_size[ 9 ];
@@ -1066,11 +1094,14 @@ static int DVDFileStatVOBPath( dvd_reader_t *dvd, int title,
   else
     sprintf( filename, "VTS_%02d_%d.VOB", title, menu ? 0 : 1 );
 
-  if( !findDVDFile( dvd, filename, full_path ) )
+  if( !findDVDFile( dvd, filename, &full_path ) ) {
+    free( full_path );
     return -1;
+  }
 
   if( stat( full_path, &fileinfo ) < 0 ) {
     fprintf( stderr, "libdvdread: Can't stat() %s.\n", filename );
+    free( full_path );
     return -1;
   }
 
@@ -1082,7 +1113,7 @@ static int DVDFileStatVOBPath( dvd_reader_t *dvd, int title,
     int cur;
     for( cur = 2; cur < 10; cur++ ) {
       sprintf( filename, "VTS_%02d_%d.VOB", title, cur );
-      if( !findDVDFile( dvd, filename, full_path ) )
+      if( !findDVDFile( dvd, filename, &full_path ) )
         break;
 
       if( stat( full_path, &fileinfo ) < 0 ) {
@@ -1101,6 +1132,7 @@ static int DVDFileStatVOBPath( dvd_reader_t *dvd, int title,
   for( n = 0; n < nr_parts; n++ )
     statbuf->parts_size[ n ] = parts_size[ n ];
 
+  free( full_path );
   return 0;
 }
 
@@ -1164,18 +1196,20 @@ int DVDFileStat( dvd_reader_t *dvd, int titlenum,
       return 0;
     }
   } else {
-    char full_path[ PATH_MAX + 1 ];
+    char *full_path = NULL;
 
-    if( findDVDFile( dvd, filename, full_path ) ) {
+    if( findDVDFile( dvd, filename, &full_path ) ) {
       if( stat( full_path, &fileinfo ) < 0 )
         fprintf( stderr, "libdvdread: Can't stat() %s.\n", filename );
       else {
         statbuf->size = fileinfo.st_size;
         statbuf->nr_parts = 1;
         statbuf->parts_size[ 0 ] = statbuf->size;
+        free( full_path );
         return 0;
       }
     }
+    free( full_path );
   }
   return -1;
 }
