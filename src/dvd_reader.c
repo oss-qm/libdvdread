@@ -29,6 +29,7 @@
 #include <stdio.h>          /* fprintf */
 #include <errno.h>          /* errno, EIN* */
 #include <string.h>         /* memcpy, strlen */
+#define __USE_GNU           /* Fix segfault */
 #include <unistd.h>         /* chdir, getcwd */
 #include <limits.h>         /* PATH_MAX */
 #include <dirent.h>         /* opendir, readdir */
