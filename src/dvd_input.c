@@ -337,7 +337,14 @@ int dvdinput_setup(void)
     return 1;
 
   } else {
-    fprintf(stderr, "libdvdread: Encrypted DVD support unavailable.\n");
+    fprintf(stderr, "libdvdread: Encrypted DVD support unavailable.\n"
+                    "************************************************\n"
+                    "**                                            **\n"
+                    "**  No css library available. See             **\n"
+                    "**  /usr/share/doc/libdvdread4/README.css     **\n"
+                    "**  for more information.                     **\n"
+                    "**                                            **\n"
+                    "************************************************\n");
 
     /* libdvdcss replacement functions */
     dvdinput_open  = file_open;
