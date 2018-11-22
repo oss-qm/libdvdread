@@ -1,0 +1,43 @@
+Source: libdvdread
+Section: graphics
+Priority: optional
+Maintainer: Debian Multimedia Maintainers <pkg-multimedia-maintainers@lists.alioth.debian.org>
+Uploaders: Reinhard Tartler <siretart@tauware.de>,
+           Benjamin Drung <bdrung@debian.org>,
+           Matteo F. Vescovi <mfv@debian.org>
+Build-Depends: debhelper (>= 10), pkg-config
+Standards-Version: 3.9.8
+Homepage: http://dvdnav.mplayerhq.hu/
+Vcs-Browser: https://anonscm.debian.org/git/pkg-multimedia/libdvdread.git/
+Vcs-Git: https://anonscm.debian.org/git/pkg-multimedia/libdvdread.git/
+
+Package: libdvdread4
+Section: libs
+Architecture: any
+Multi-Arch: same
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Recommends: libdvdnav4
+Suggests: libdvdcss2
+Description: library for reading DVDs
+ libdvdread provides the functionality that is required to access many DVDs. It
+ parses IFO files, reads NAV-blocks, and performs CSS authentication and
+ descrambling.
+ .
+ libdvdread probes for libdvdcss at runtime and if found, will use it to
+ decrypt sections of the DVD as necessary. libdvdcss needs to be installed from
+ third-party repositories (see README.css), it's not included in Debian.
+
+Package: libdvdread-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends: libdvdread4 (= ${binary:Version}), pkg-config, ${misc:Depends}
+Recommends: libdvdnav-dev
+Suggests: libdvdcss-dev
+Description: library for reading DVDs (development)
+ libdvdread provides the functionality that is required to access many DVDs. It
+ parses IFO files, reads NAV-blocks, and performs CSS authentication and
+ descrambling.
+ .
+ This package contains the development files.
